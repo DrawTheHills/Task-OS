@@ -109,6 +109,7 @@ Message count: 5
 ```
 
 **Sample Output :** <br>
+
 ![Screenshot 2025-04-30 172005](https://github.com/user-attachments/assets/511c5f2a-0bfc-4d7f-bb0d-c1ce2cf3af68) <br>
 ![image](https://github.com/user-attachments/assets/f9e210b2-8e6d-41c5-93f6-10ac075069ea)
 ---
@@ -268,6 +269,7 @@ Received at lb: halo (#message 5)
 tidak ada output yang ditampilkan di terminal pada `loadbalancer.c`
 
 **Sample Output :** <br>
+
 ![Screenshot 2025-04-30 172122](https://github.com/user-attachments/assets/de2b1c76-5cf8-4ec7-869b-2a46066b78e1) <br>
 ![image](https://github.com/user-attachments/assets/b09dcd47-0743-4933-a609-eb0f0993bdc4)
 ---
@@ -424,6 +426,7 @@ Worker n: [message]
 ```
 
 **Sample Output** <br>
+
 ![Screenshot 2025-04-30 172107](https://github.com/user-attachments/assets/8664e0d6-c3ca-4128-85b0-3ef1d5e7b7f7) <br>
 ![Screenshot 2025-04-30 172148](https://github.com/user-attachments/assets/9a6ab33a-db75-451f-9e48-6ce1ad8364e0) <br>
 ![Screenshot 2025-04-30 172214](https://github.com/user-attachments/assets/df6d80ed-3815-45cc-bc63-e4d714067bd1)
@@ -454,6 +457,7 @@ Worker 3: 1 messages
 ```
 
 **Ouput Sample :** <br>
+
 ![image](https://github.com/user-attachments/assets/ef7557b7-d0c5-4503-ba01-ac6cc02be2ed)
 ---
 
