@@ -92,4 +92,5 @@
 
 - **Screenshot:**
 
-  ![Screenshot 2025-05-23 210036](https://github.com/user-attachments/assets/8e856a38-0019-4049-a923-5cf0e424307f)
+  ![Screenshot 2025-05-23 211009](https://github.com/user-attachments/assets/d300b084-6052-4b0e-81c2-ce0cd15d0d6b)
+
