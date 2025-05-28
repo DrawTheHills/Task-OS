@@ -19,6 +19,28 @@
   ![Screenshot 2025-05-28 185414](https://github.com/user-attachments/assets/a5396898-5c8f-4d69-ab70-0face39fd9ec)
   ![Screenshot 2025-05-23 205427](https://github.com/user-attachments/assets/5e37e156-917c-4382-a16f-90e925cb4aba)
 
+### Soal 6
+
+> Dosen Budiman menginginkan sistem operasi yang **stylish**. Budiman memiliki ide untuk membuat sistem operasinya menjadi stylish. Ia meminta kamu untuk menambahkan tampilan sebuah banner yang ditampilkan setelah suatu user login ke dalam sistem operasi Budiman. Banner yang diinginkan Budiman adalah tulisan `"Welcome to OS'25"` dalam bentuk **ASCII Art**. Buatkanlah banner tersebut supaya Budiman senang! (Hint: gunakan text to ASCII Art Generator)
+
+> _Budiman wants a **stylish** operating system. Budiman has an idea to make his OS stylish. He asks you to add a banner that appears after a user logs in. The banner should say `"Welcome to OS'25"` in **ASCII Art**. Use a text to ASCII Art generator to make Budiman happy!_ (Hint: use a text to ASCII Art generator)
+
+**Answer:**
+
+- **Code:**
+
+  etc/motd : Input hasil generate ASCII art generator ke dalam `etc/motd`
+
+- **Explanation:**
+
+  - Membuat sebuah file bernama `motd` di dalam direktori `etc/`
+  - Input hasil generate ASCII art generator ke dalam `etc/motd`
+
+- **Screenshot:**
+
+  ![Screenshot 2025-05-28 211120](https://github.com/user-attachments/assets/63ed84dc-1b76-4d79-a309-431f94b0e537)
+
+
 ### Soal 7
 
 > Melihat perkembangan sistem operasi milik Budiman, Dosen kagum dengan adanya banner yang telah kamu buat sebelumnya. Kemudian Dosen juga menginginkan sistem operasi Budiman untuk dapat menampilkan **kata sambutan** dengan menyebut nama user yang login. Sambutan yang dimaksud berupa kalimat `"Helloo %USER"` dengan `%USER` merupakan nama user yang sedang menggunakan sistem operasi. Kalimat sambutan ini ditampilkan setelah user login dan setelah banner. Budiman kembali lagi meminta bantuanmu dalam menambahkan fitur ini.
@@ -93,4 +115,3 @@
 - **Screenshot:**
 
   ![Screenshot 2025-05-23 211009](https://github.com/user-attachments/assets/d300b084-6052-4b0e-81c2-ce0cd15d0d6b)
-
