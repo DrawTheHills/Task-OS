@@ -43,15 +43,13 @@
 
 char source_dir[PATH_MAX];
 char secret_name[NAME_MAX] = "secret";
-int access_start_hour = 8;
-int access_end_hour = 18;
+int accessst = 8;
+int accessend = 18;
 
-void log_action(const char *action, const char *path) {
-    fprintf(stderr, "[DEBUG] log_action called for %s %s\n", action, path);
+void logaction(const char *action, const char *path) {
 
     FILE *log_fp = fopen("lawakfs.log", "a");
     if (!log_fp) {
-        perror("[ERROR] fopen log");
         return;
     }
 
@@ -65,7 +63,6 @@ void log_action(const char *action, const char *path) {
             uid, action, path);
 
     fclose(log_fp);
-    fprintf(stderr, "[DEBUG] log_action write successful\n");
 }
 
 void parse_config() {
@@ -80,27 +77,27 @@ void parse_config() {
         if (strncmp(line, "SECRET_FILE_BASENAME=", 22) == 0) {
             sscanf(line + 22, "%s", secret_name);
         } else if (strncmp(line, "ACCESS_START=", 13) == 0) {
-            sscanf(line + 13, "%d", &access_start_hour);
+            sscanf(line + 13, "%d", &accessst);
         } else if (strncmp(line, "ACCESS_END=", 11) == 0) {
-            sscanf(line + 11, "%d", &access_end_hour);
+            sscanf(line + 11, "%d", &accessend);
         }
     }
     fclose(fp);
 }
 
-int is_secret_file(const char *name) {
+int issecret(const char *name) {
     return strncmp(name, secret_name, strlen(secret_name)) == 0;
 }
 
-int check_secret_access() {
+int checksecret() {
     time_t t = time(NULL);
     struct tm *tm = localtime(&t);
     int hour = tm->tm_hour;
 
-    return hour >= access_start_hour && hour < access_end_hour;
+    return hour >= accessst && hour < accessend;
 }
 
-static char *find_real_filename(const char *dirname, const char *name_wo_ext) {
+static char *findname(const char *dirname, const char *name_wo_ext) {
     static char result[PATH_MAX];
     DIR *dp = opendir(dirname);
     struct dirent *de;
@@ -134,10 +131,10 @@ static int lawakfs_getattr(const char *path, struct stat *stbuf,
         snprintf(real_path, PATH_MAX, "%s", source_dir);
     } else {
         const char *name = path + 1;
-        if (is_secret_file(name) && !check_secret_access()) {
+        if (issecret(name) && !checksecret()) {
             return -ENOENT;
         }
-        char *full_real = find_real_filename(source_dir, name);
+        char *full_real = findname(source_dir, name);
         if (!full_real) return -ENOENT;
         snprintf(real_path, PATH_MAX, "%s", full_real);
     }
@@ -176,10 +173,10 @@ static int lawakfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                 char name_wo_ext[NAME_MAX];
                 strncpy(name_wo_ext, de->d_name, len);
                 name_wo_ext[len] = '\0';
-                if (is_secret_file(name_wo_ext) && !check_secret_access()) continue;
+                if (issecret(name_wo_ext) && !checksecret()) continue;
                 filler(buf, name_wo_ext, NULL, 0, 0);
             } else {
-                if (is_secret_file(de->d_name) && !check_secret_access()) continue;
+                if (issecret(de->d_name) && !checksecret()) continue;
                 filler(buf, de->d_name, NULL, 0, 0);
             }
         } else {
@@ -194,11 +191,11 @@ static int lawakfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 static int lawakfs_open(const char *path, struct fuse_file_info *fi) {
     char real_path[PATH_MAX];
     const char *name = path + 1;
-    if (is_secret_file(name) && !check_secret_access()) {
+    if (issecret(name) && !checksecret()) {
         return -ENOENT;
     }
 
-    char *full_real = find_real_filename(source_dir, name);
+    char *full_real = findname(source_dir, name);
     if (!full_real) return -ENOENT;
 
     snprintf(real_path, PATH_MAX, "%s", full_real);
@@ -216,11 +213,11 @@ static int lawakfs_read(const char *path, char *buf, size_t size, off_t offset,
     (void) fi;
     char real_path[PATH_MAX];
     const char *name = path + 1;
-    if (is_secret_file(name) && !check_secret_access()) {
+    if (issecret(name) && !checksecret()) {
         return -ENOENT;
     }
 
-    char *full_real = find_real_filename(source_dir, name);
+    char *full_real = findname(source_dir, name);
     if (!full_real) return -ENOENT;
     snprintf(real_path, PATH_MAX, "%s", full_real);
 
@@ -234,7 +231,7 @@ static int lawakfs_read(const char *path, char *buf, size_t size, off_t offset,
 
     close(fd);
     if (res > 0) {
-        log_action("READ", path);
+        logaction("READ", path);
     }
 
     return res;
@@ -247,11 +244,11 @@ static int lawakfs_access(const char *path, int mask) {
         snprintf(real_path, PATH_MAX, "%s", source_dir);
     } else {
         const char *name = path + 1;
-        if (is_secret_file(name) && !check_secret_access()) {
+        if (issecret(name) && !checksecret()) {
             return -ENOENT;
         }
 
-        char *full_real = find_real_filename(source_dir, name);
+        char *full_real = findname(source_dir, name);
         if (!full_real) return -ENOENT;
 
         snprintf(real_path, PATH_MAX, "%s", full_real);
@@ -260,7 +257,7 @@ static int lawakfs_access(const char *path, int mask) {
     if (access(real_path, mask) == -1)
         return -errno;
 
-    log_action("ACCESS", path);
+    logaction("ACCESS", path);
     return 0;
 }
 
@@ -279,7 +276,7 @@ int main(int argc, char *argv[]) {
     }
 
     realpath(argv[1], source_dir);
-    printf("Using source_dir: %s\n", source_dir);
+    printf("Using dir: %s\n", source_dir);
 
     parse_config();
 
@@ -288,6 +285,7 @@ int main(int argc, char *argv[]) {
 
     return fuse_main(argc, argv, &lawakfs_oper, NULL);
 }
+
 ```
 
 ```c
@@ -309,7 +307,7 @@ ACCESS_END=18:00
     - ACCESS_START dan ACCESS_END: waktu di mana file rahasia boleh diakses.
     Nilai-nilai ini disimpan dalam variabel global untuk digunakan oleh seluruh program.
 
-- **Kontrol Akses Berdasarkan Waktu (check_secret_access)**
+- **Kontrol Akses Berdasarkan Waktu (checksecret)**
     Fungsi ini membatasi akses ke file "secret" hanya saat jam kerja, yaitu antara ACCESS_START dan ACCESS_END. Jika diakses di luar jam tersebut, file dianggap tidak ada (ENOENT).
 
 - **Menyembunyikan Ekstensi File (readdir)**
@@ -317,7 +315,7 @@ ACCESS_END=18:00
     - File regular dengan ekstensi akan ditampilkan tanpa ekstensinya (contoh: file.txt → tampil sebagai file).
     - Nama file ini diproses ulang untuk pemetaan ke file asli saat open, read, dan getattr.
 
-- **Mencari Nama File Asli (find_real_filename)**
+- **Mencari Nama File Asli (findname)**
     Fungsi ini mencari file asli di direktori sumber berdasarkan nama tanpa ekstensi (yang ditampilkan ke pengguna), dan mengembalikan path lengkap file dengan ekstensi aslinya.
 
 - **Pemrosesan Akses File (getattr, open, read, access)**
@@ -346,9 +344,5 @@ ACCESS_END=18:00
 - **ACCESS_END=18:00**
     Menentukan jam akhir kapan file rahasia masih boleh diakses.
 
-### Screnshoot
-
-![Screenshot 2025-06-22 181935](https://github.com/user-attachments/assets/16f3a986-dd21-4659-86cf-520b2e5080e6)
-
-![Screenshot 2025-06-22 183111](https://github.com/user-attachments/assets/afe0a055-040f-4969-bc80-5cc2080a1c34)
+### Screnshot
 
