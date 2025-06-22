@@ -1,470 +1,354 @@
-## TASK 4
+## TASK 3 - LawakFS++ - A Cursed Filesystem with Censorship and Strict Access Policies
 
-**Pipip's Load Balancer**
-Task 4 : Pipip's Load Balancer meminta untuk membuat sistem distribusi pesan dengan sistem load balancing. Sistem dirancang untuk memungkinkan pesan dari client bisa disalurkan secara efisien ke beberapa worker. Dengan menggunakan komunikasi antar-proses (`IPC`)dan memastikan bahwa proses pengiriman pesan berjalan mulus dan terorganisir dengan baik, melalui sistem log yang tercatat dengan rapi.
+- Implementasi Filesystem FUSE dengan fungsi minimal:
+    getattr, readdir, open, read, access
+    Read-only: semua operasi tulis harus ditolak (EROFS)
+    Blokir eksplisit syscall tulis: write, truncate, create, unlink, mkdir, rmdir, rename
 
-### A : Client Mengirimkan Pesan ke Load Balancer
+- Fitur-fitur yang Harus Diimplementasikan:
+    - Hidden Extension:
+        - Semua file di-mount tanpa ekstensi saat ls
+        - Akses file harus tetap mengarah ke file asli dengan ekstensi
+    - Time-Based Access untuk File "Secret"
+        - File dengan nama dasar secret hanya bisa diakses antara jam tertentu (default: 08:00–18:00)
+        - Di luar jam: kembalikan ENOENT pada operasi access, getattr, readdir, dll.
+    - Dynamic Content Filtering:
+        - Teks: kata-kata tertentu (dari konfigurasi) diganti dengan "lawak" (case-insensitive)
+        - Biner: isi ditampilkan sebagai string base64 saat dibaca
+    - Logging:
+        - Log semua operasi read dan access yang berhasil ke /var/log/lawakfs.log
+        - Format log: [YYYY-MM-DD HH:MM:SS] [UID] [ACTION] [PATH]
+    - Konfigurasi Eksternal (lawak.conf):
+        - SECRET_FILE_BASENAME
+        - ACCESS_START dan ACCESS_END
+        - FILTER_WORDS (kata-kata yang diganti jadi “lawak”)
 
-Membuat proses `client.c` agar dapat dapat mengirimkan pesan ke `loadbalancer.`c menggunakan IPC dengan metode shared memory. Selain itu, setiap kali pesan dikirim, proses client.c harus menuliskan aktivitasnya ke dalam `sistem.log`
-
-**Code**
-client.c 
+### Code
+**Lawakfs.c**
 ```c
+#define FUSE_USE_VERSION 31
+#include <fuse3/fuse.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <stdlib.h>
+#include <limits.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <pwd.h>
 
-int main(){
-    char input[512], message[512];
-    int count;
+char source_dir[PATH_MAX];
+char secret_name[NAME_MAX] = "secret";
+int access_start_hour = 8;
+int access_end_hour = 18;
 
-    printf("input [ message;sum ] : ");
-    fgets(input, sizeof(input), stdin);
-    sscanf(input, "%[^;];%d", message, &count);
+void log_action(const char *action, const char *path) {
+    fprintf(stderr, "[DEBUG] log_action called for %s %s\n", action, path);
 
-    char full[1024];
-    snprintf(full, sizeof(full), "%s\n%d\n", message, count);
+    FILE *log_fp = fopen("lawakfs.log", "a");
+    if (!log_fp) {
+        perror("[ERROR] fopen log");
+        return;
+    }
 
-    int shid = shmget(1234, 1024, IPC_CREAT | 0666);
-    char* shP = (char*) shmat(shid, NULL, 0);
+    time_t t = time(NULL);
+    struct tm *lt = localtime(&t);
+    uid_t uid = getuid();
 
-    while (shP[0] != '\0') sleep(1);
+    fprintf(log_fp, "[%04d-%02d-%02d %02d:%02d:%02d] [%d] [%s] [%s]\n",
+            lt->tm_year + 1900, lt->tm_mon + 1, lt->tm_mday,
+            lt->tm_hour, lt->tm_min, lt->tm_sec,
+            uid, action, path);
 
-    strcpy(shP, full);
-
-    FILE* log = fopen("sistem.log", "a");
-    fprintf(log, "Message from client: %s\n", message);
-    fprintf(log, "Message count: %d\n", count);
-    fclose(log);
-
-    shmdt(shP);
-    return 0;
+    fclose(log_fp);
+    fprintf(stderr, "[DEBUG] log_action write successful\n");
 }
-```
 
-**Penjelasan :**
-- `stdio.h`, `stdlib.h`, `string.h` : Input/output standar, alokasi memori, dan manipulasi string.
-- `sys/ipc.h`, `sys/shm.h` : Untuk menggunakan fungsi-fungsi IPC dengan shared memory.
-- `unistd.h` : Digunakan untuk fungsi `sleep()`.
-
-```
-char input[512], message[512];
-int count;
-
-printf("input [ message;sum ] : ");
-fgets(input, sizeof(input), stdin);
-sscanf(input, "%[^;];%d", message, &count);
-```
-- `fgets` membaca input dengan syarat : message;sum
-- `sscanf` memecah input menjadi dua bagian : `message` (sebelum titik koma) dan `count` (setelah titik koma)
-
-```
-char full[1024];
-snprintf(full, sizeof(full), "%s\n%d\n", message, count);
-```
-- Menggabungkan message dan count menjadi satu string dan dipisahkan oleh newline (`\n`), untuk dikirim ke shared memory.
-
-```
-int shid = shmget(1234, 1024, IPC_CREAT | 0666);
-char* shP = (char*) shmat(shid, NULL, 0);
-```
-- `shmget` membuat atau mendapatkan shared memory segment dengan **key = 1234** dan **ukuran = 1024 byte**.
-- `shmat` meng-attach segment tersebut ke alamat memori proses dan mengembalikan pointer-nya (`shP`).
-
-```
-while (shP[0] != '\0') sleep(1);
-strcpy(shP, full);
-```
-- Menunggu sampai karakter pertama di shared memory adalah null (`'\0'`).
-- Menyalin isi `full` ke shared memory sehingga bisa dibaca oleh proses `loadbalancer.c`.
-
-```
-FILE* log = fopen("sistem.log", "a");
-fprintf(log, "Message from client: %s\n", message);
-fprintf(log, "Message count: %d\n", count);
-fclose(log);
-```
-- Mencatat isi pesan dan jumlah pesan ke file `sistem.log`.
-- File dibuka dengan mode append ("a"), jadi data baru ditambahkan di akhir file.
-
-```
-shmdt(shP);
-```
-- Memutus koneksi (detach) pointer `shP` dari shared memory.
-
-**Ouput/input :**
-
-client.c*
-```
-input [ message;sum ] : halo;5
-```
-
-sistem.log
-```
-Message from client: halo
-Message count: 5
-```
-
-**Sample Output :** <br>
-
-![Screenshot 2025-04-30 172005](https://github.com/user-attachments/assets/511c5f2a-0bfc-4d7f-bb0d-c1ce2cf3af68) <br>
-![image](https://github.com/user-attachments/assets/f9e210b2-8e6d-41c5-93f6-10ac075069ea)
----
-
-
-### B : Load Balancer Mendistribusikan Pesan ke Worker Secara Round-Robin
-
-Setelah menerima pesan dari `client.c`, `loadbalancer.c` akan mendistribusikan pesan-pesan tersebut ke beberapa worker menggunakan metode round-robin. Sebelum mendistribusikan pesan, `loadbalancer.c` terlebih dahulu mencatat informasi ke dalam `sistem.log`.
-
-**Code :**
-loadbalancer.c
-```c
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
-#include <sys/msg.h>
-#include <unistd.h>
-
-struct msgbuf{
-    long type;
-    char text[1024];
-};
-
-int main(){
-    int srid = shmget(1234, 1024, 0666);
-    if (srid < 0){
-        perror("shmget failed");
-        exit(1);
+void parse_config() {
+    FILE *fp = fopen("lawak.conf", "r");
+    if (!fp) {
+        perror("Failed to open config");
+        return;
     }
 
-    char* srp = (char*) shmat(srid, NULL, 0);
-    if (srp == (char *) -1){
-        perror("shmat failed");
-        exit(1);
-    }
-
-    int msid = msgget(5678, IPC_CREAT | 0666);
-    if (msid < 0){
-        perror("msgget failed");
-        exit(1);
-    }
-
-    while (1){
-        if (srp[0] != '\0'){
-            char text[512];
-            int count;
-
-            if (sscanf(srp, "%[^\n]\n%d", text, &count) != 2){
-                fprintf(stderr, "Format input tidak valid. Gunakan format: message;jumlah\n");
-                srp[0] = '\0';
-                continue;
-            }
-
-            FILE* log = fopen("sistem.log", "a");
-            for (int i = 0; i < count; i++){
-                fprintf(log, "Received at lb: %s (#message %d)\n", text, i + 1);
-\
-                struct msgbuf msg;
-                msg.type = (i % 3) + 1;
-                strcpy(msg.text, text);
-                if (msgsnd(msid, &msg, strlen(msg.text) + 1, 0) == -1){
-                    perror("failed");
-                    exit(1);
-                }
-            }
-            fclose(log);
-            
-            srp[0] = '\0';
+    char line[256];
+    while (fgets(line, sizeof(line), fp)) {
+        if (strncmp(line, "SECRET_FILE_BASENAME=", 22) == 0) {
+            sscanf(line + 22, "%s", secret_name);
+        } else if (strncmp(line, "ACCESS_START=", 13) == 0) {
+            sscanf(line + 13, "%d", &access_start_hour);
+        } else if (strncmp(line, "ACCESS_END=", 11) == 0) {
+            sscanf(line + 11, "%d", &access_end_hour);
         }
-
-        sleep(1); 
     }
-
-    shmdt(srp);
-    return 0;
-}
-```
-
-**Penjelasan :**
-- `stdio.h`, `stdlib.h`, `string.h` : Input/output standar, alokasi memori, dan manipulasi string.
-- `sys/ipc.h`, `sys/shm.h` : Untuk menggunakan fungsi-fungsi IPC dengan shared memory.
-- `unistd.h` : Digunakan untuk fungsi `sleep()`.
-
-```
-struct msgbuf{
-    long type;
-    char text[1024];
-};
-```
-- `typer` : Menentukan worker yang akan menerima pesan
-- `text` : Isi pesan
-
-```
-int srid = shmget(1234, 1024, 0666);
-```
-- Mendapatkan ID shared memory dengan key **1234** dan ukuran **1024** byte.
-- Mode `0666` : Read/write untuk user, group, others.
-
-```
-int msid = msgget(5678, IPC_CREAT | 0666);
-```
-- Membuat atau mengambil message queue dengan key `5678`.
-- Mode akses read/write.
-
-```
-while (1) {
-    if (srp[0] != '\0') {
-        // the rest
-    }
-    sleep(1);
-}
-```
-- Loop terus berjalan.
-- Mengecek apakah ada pesan baru di shared memory `(srp[0] != '\0')`.
-- Setelah selesai diproses, `srp[0] = '\0'` agar pesan tidak dikirim dua kali.
-- `sleep` 1 detik agar tidak membebani CPU.
-
-```
-if (sscanf(srp, "%[^\n]\n%d", text, &count) != 2)
-```
-- Mengekstrak teks dan jumlah pengiriman dari shared memory.
-- Format input harus seperti: `pesan\njumlah`
-- Jika format salah, tampilkan error dan kosongkan shared memory.
-
-```
-for (int i = 0; i < count; i++) {
-    fprintf(log, "Received at lb: %s (#message %d)\n", text, i + 1);
-
-    struct msgbuf msg;
-    msg.type = (i % 3) + 1;  // Untuk mengirim ke worker 1, 2, atau 3
-    strcpy(msg.text, text);
-
-    msgsnd(msid, &msg, strlen(msg.text) + 1, 0);
-}
-```
-- Menulis log untuk setiap pesan yang diterima.
-- `msg.type = (i % 3) + 1` : membagi pesan ke 3 worker secara merata.
-- `msgsnd` : mengirim pesan ke message queue.
-
-```
-shmdt(srp);
-```
-- Detach pointer dari shared memory (meskipun tidak pernah dieksekusi karena `while(1)`).
-
-**Ouput/input :**
-
-sistem.log
-```
-Received at lb: halo (#message 1)
-Received at lb: halo (#message 2)
-Received at lb: halo (#message 3)
-Received at lb: halo (#message 4)
-Received at lb: halo (#message 5)
-```
-tidak ada output yang ditampilkan di terminal pada `loadbalancer.c`
-
-**Sample Output :** <br>
-
-![Screenshot 2025-04-30 172122](https://github.com/user-attachments/assets/de2b1c76-5cf8-4ec7-869b-2a46066b78e1) <br>
-![image](https://github.com/user-attachments/assets/b09dcd47-0743-4933-a609-eb0f0993bdc4)
----
-
-
-### C : Worker Mencatat Pesan yang Diterima
-
-Setiap worker yang menerima pesan dari loadbalancer.c harus mencatat pesan yang diterima ke dalam `sistem.log`
-
-**Code :**
-worker.c
-```c
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/ipc.h>
-#include <sys/msg.h>
-#include <unistd.h>
-#include <signal.h>
-
-struct buf {
-    long type;
-    char text[1024];
-};
-
-int id;
-int total = 0;
-
-void handle(int sig){
-    FILE *log = fopen("sistem.log", "a");
-    if (log != NULL) {
-        fprintf(log, "Worker %d: %d messages\n", id, total);
-        fclose(log);
-    }
-    printf("Total messages: %d\n",  total);
-    exit(0);
+    fclose(fp);
 }
 
-int main(int argc, char *argv[]){
-    if (argc != 2) {
-        fprintf(stderr, "Cara pakai: %s <nomor_worker>\n", argv[0]);
-        exit(1);
-    }
+int is_secret_file(const char *name) {
+    return strncmp(name, secret_name, strlen(secret_name)) == 0;
+}
 
-    id = atoi(argv[1]);
+int check_secret_access() {
+    time_t t = time(NULL);
+    struct tm *tm = localtime(&t);
+    int hour = tm->tm_hour;
 
-    signal(SIGINT, handle);
+    return hour >= access_start_hour && hour < access_end_hour;
+}
 
-    int IDmsg = msgget(5678, 0666);
-    if (IDmsg < 0) {
-        perror("failed");
-        exit(1);
-    }
+static char *find_real_filename(const char *dirname, const char *name_wo_ext) {
+    static char result[PATH_MAX];
+    DIR *dp = opendir(dirname);
+    struct dirent *de;
 
-    struct buf buff;
-    printf("Worker %d ready.\n", id);
+    if (!dp) return NULL;
 
-    while (1) {
-        if (msgrcv(IDmsg, &buff, sizeof(buff.text), id, 0) != -1) {
-            printf("Worker %d: %s\n", id, buff.text);
-
-            FILE *log = fopen("sistem.log", "a");
-            if (log != NULL) {
-                fprintf(log, "Worker%d: message received\n", id);
-                fclose(log);
+    while ((de = readdir(dp)) != NULL) {
+        char *dot = strrchr(de->d_name, '.');
+        if (dot) {
+            size_t len = dot - de->d_name;
+            if (strncmp(de->d_name, name_wo_ext, len) == 0 &&
+                strlen(name_wo_ext) == len) {
+                snprintf(result, PATH_MAX, "%s/%s", dirname, de->d_name);
+                closedir(dp);
+                return result;
             }
-
-            total++;
         }
     }
 
+    closedir(dp);
+    return NULL;
+}
+
+static int lawakfs_getattr(const char *path, struct stat *stbuf,
+                           struct fuse_file_info *fi) {
+    (void) fi;
+    int res;
+    char real_path[PATH_MAX];
+
+    if (strcmp(path, "/") == 0) {
+        snprintf(real_path, PATH_MAX, "%s", source_dir);
+    } else {
+        const char *name = path + 1;
+        if (is_secret_file(name) && !check_secret_access()) {
+            return -ENOENT;
+        }
+        char *full_real = find_real_filename(source_dir, name);
+        if (!full_real) return -ENOENT;
+        snprintf(real_path, PATH_MAX, "%s", full_real);
+    }
+
+    res = lstat(real_path, stbuf);
+    if (res == -1)
+        return -errno;
+
     return 0;
 }
-```
 
-**Penjelasan :**
-- Standar input/output dan memori (stdio, stdlib).
-- String handling.
-- Fungsi IPC untuk message queue.
-- Signal handling (SIGINT → fungsi handle).
+static int lawakfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+                           off_t offset, struct fuse_file_info *fi,
+                           enum fuse_readdir_flags flags) {
+    (void) offset;
+    (void) fi;
+    (void) flags;
 
-```
-struct buf {
-    long type;
-    char text[1024];
+    DIR *dp;
+    struct dirent *de;
+    char full_path[PATH_MAX];
+
+    snprintf(full_path, PATH_MAX, "%s%s", source_dir, path);
+    dp = opendir(full_path);
+    if (dp == NULL)
+        return -errno;
+
+    filler(buf, ".", NULL, 0, 0);
+    filler(buf, "..", NULL, 0, 0);
+
+    while ((de = readdir(dp)) != NULL) {
+        if (de->d_type == DT_REG) {
+            char *dot = strrchr(de->d_name, '.');
+            if (dot) {
+                size_t len = dot - de->d_name;
+                char name_wo_ext[NAME_MAX];
+                strncpy(name_wo_ext, de->d_name, len);
+                name_wo_ext[len] = '\0';
+                if (is_secret_file(name_wo_ext) && !check_secret_access()) continue;
+                filler(buf, name_wo_ext, NULL, 0, 0);
+            } else {
+                if (is_secret_file(de->d_name) && !check_secret_access()) continue;
+                filler(buf, de->d_name, NULL, 0, 0);
+            }
+        } else {
+            filler(buf, de->d_name, NULL, 0, 0);
+        }
+    }
+
+    closedir(dp);
+    return 0;
+}
+
+static int lawakfs_open(const char *path, struct fuse_file_info *fi) {
+    char real_path[PATH_MAX];
+    const char *name = path + 1;
+    if (is_secret_file(name) && !check_secret_access()) {
+        return -ENOENT;
+    }
+
+    char *full_real = find_real_filename(source_dir, name);
+    if (!full_real) return -ENOENT;
+
+    snprintf(real_path, PATH_MAX, "%s", full_real);
+
+    int fd = open(real_path, O_RDONLY);
+    if (fd == -1)
+        return -errno;
+
+    close(fd);
+    return 0;
+}
+
+static int lawakfs_read(const char *path, char *buf, size_t size, off_t offset,
+                        struct fuse_file_info *fi) {
+    (void) fi;
+    char real_path[PATH_MAX];
+    const char *name = path + 1;
+    if (is_secret_file(name) && !check_secret_access()) {
+        return -ENOENT;
+    }
+
+    char *full_real = find_real_filename(source_dir, name);
+    if (!full_real) return -ENOENT;
+    snprintf(real_path, PATH_MAX, "%s", full_real);
+
+    int fd = open(real_path, O_RDONLY);
+    if (fd == -1)
+        return -errno;
+
+    int res = pread(fd, buf, size, offset);
+    if (res == -1)
+        res = -errno;
+
+    close(fd);
+    if (res > 0) {
+        log_action("READ", path);
+    }
+
+    return res;
+}
+
+static int lawakfs_access(const char *path, int mask) {
+    char real_path[PATH_MAX];
+
+    if (strcmp(path, "/") == 0) {
+        snprintf(real_path, PATH_MAX, "%s", source_dir);
+    } else {
+        const char *name = path + 1;
+        if (is_secret_file(name) && !check_secret_access()) {
+            return -ENOENT;
+        }
+
+        char *full_real = find_real_filename(source_dir, name);
+        if (!full_real) return -ENOENT;
+
+        snprintf(real_path, PATH_MAX, "%s", full_real);
+    }
+
+    if (access(real_path, mask) == -1)
+        return -errno;
+
+    log_action("ACCESS", path);
+    return 0;
+}
+
+static struct fuse_operations lawakfs_oper = {
+    .getattr = lawakfs_getattr,
+    .readdir = lawakfs_readdir,
+    .open    = lawakfs_open,
+    .read    = lawakfs_read,
+    .access  = lawakfs_access,
 };
-```
-- `typer` : Menentukan worker yang akan menerima pesan
-- `text` : Isi pesan
 
-```
-int id;
-int total = 0;
-```
-- `id` : ID/nama worker.
-- `total` : jumlah pesan yang telah diterima oleh worker.
-
-```
-void handle(int sig){
-    FILE *log = fopen("sistem.log", "a");
-    if (log != NULL) {
-        fprintf(log, "Worker %d: %d messages\n", id, total);
-        fclose(log);
+int main(int argc, char *argv[]) {
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s <source_dir> <mount_point>\n", argv[0]);
+        exit(EXIT_FAILURE);
     }
-    printf("Total messages: %d\n",  total);
-    exit(0);
+
+    realpath(argv[1], source_dir);
+    printf("Using source_dir: %s\n", source_dir);
+
+    parse_config();
+
+    argv[1] = argv[2];
+    argc--;
+
+    return fuse_main(argc, argv, &lawakfs_oper, NULL);
 }
 ```
-- Ketika user menekan `Ctrl+C`, fungsi ini:
-    - Menuliskan jumlah pesan ke `sistem.log`.
-    - Menampilkan jumlah pesan ke terminal.
-    - Keluar dari program.
 
-```
-if (argc != 2) {
-    fprintf(stderr, "Cara pakai: %s <nomor_worker>\n", argv[0]);
-    exit(1);
-}
-id = atoi(argv[1]);
-```
-- Mengecek argumen saat menjalankan program.
-- ID worker harus diberikan, misal: `./worker 1`
-
-```
-signal(SIGINT, handle);
-```
-- Menghubungkan `SIGINT` (dari `Ctrl+C`) ke fungsi handle.
-
-```
-int IDmsg = msgget(5678, 0666);
-```
-- Terhubung ke message queue yang sudah dibuat oleh `Load Balancer`
-
-```
-while (1) {
-    if (msgrcv(IDmsg, &buff, sizeof(buff.text), id, 0) != -1) {
-        // the rest
-    }
-}
-```
-- Worker akan terus menunggu pesan dengan type == id.
-- Ketika pesan diterima maka akan ditampilkan ke terminal, Dicatat di `sistem.log` dan Variabel total ditambah.
-
-**Ouput/Input :**
-
-worker.c : 
-./worker (n) -> example
-```
-./worker n
-Worker n ready.
-Worker n: [message]
-.......
-^CWorker 1 exiting. Total messages: m
+```c
+SECRET_FILE_BASENAME=secret
+ACCESS_START=08:00
+ACCESS_END=18:00
 ```
 
-**Sample Output** <br>
+### Explanation
 
-![Screenshot 2025-04-30 172107](https://github.com/user-attachments/assets/8664e0d6-c3ca-4128-85b0-3ef1d5e7b7f7) <br>
-![Screenshot 2025-04-30 172148](https://github.com/user-attachments/assets/9a6ab33a-db75-451f-9e48-6ce1ad8364e0) <br>
-![Screenshot 2025-04-30 172214](https://github.com/user-attachments/assets/df6d80ed-3815-45cc-bc63-e4d714067bd1)
----
+**Lawakfs.c**
+
+- **Read-only Filesystem**
+    Semua file hanya bisa dibaca, dan tidak ada operasi tulis yang diizinkan. Fungsi seperti `write`, `create`, `rm`, dan lainnya tidak diimplementasikan untuk menjaga filesystem tetap read-only.
+
+- **Parsing Konfigurasi (parse_config)**
+    Fungsi ini membaca file konfigurasi eksternal lawak.conf, yang memuat:
+    - SECRET_FILE_BASENAME: nama dasar file yang dianggap sebagai file rahasia.
+    - ACCESS_START dan ACCESS_END: waktu di mana file rahasia boleh diakses.
+    Nilai-nilai ini disimpan dalam variabel global untuk digunakan oleh seluruh program.
+
+- **Kontrol Akses Berdasarkan Waktu (check_secret_access)**
+    Fungsi ini membatasi akses ke file "secret" hanya saat jam kerja, yaitu antara ACCESS_START dan ACCESS_END. Jika diakses di luar jam tersebut, file dianggap tidak ada (ENOENT).
+
+- **Menyembunyikan Ekstensi File (readdir)**
+    Dalam fungsi readdir, saat filesystem membaca isi direktori:
+    - File regular dengan ekstensi akan ditampilkan tanpa ekstensinya (contoh: file.txt → tampil sebagai file).
+    - Nama file ini diproses ulang untuk pemetaan ke file asli saat open, read, dan getattr.
+
+- **Mencari Nama File Asli (find_real_filename)**
+    Fungsi ini mencari file asli di direktori sumber berdasarkan nama tanpa ekstensi (yang ditampilkan ke pengguna), dan mengembalikan path lengkap file dengan ekstensi aslinya.
+
+- **Pemrosesan Akses File (getattr, open, read, access)**
+    - Fungsi-fungsi tersebut bertugas menerjemahkan path dari user ke path asli di direktori sumber.
+    - Jika file adalah "secret" dan akses dilakukan di luar jam, fungsi langsung mengembalikan ENOENT.
+
+- **Log**
+    - Membuka file lawakfs.log dengan mode append ("a").
+    - Menulis data log sesuai format.
+    - Menutup file log kembali.
+
+- **Main**
+    - Memastikan bahwa argumen input adalah source_dir dan mount_point.
+    - Menyimpan path absolut direktori sumber.
+    - Memanggil parse_config() untuk memuat konfigurasi dari lawak.conf.
 
 
-### D : Catat Total Pesan yang Diterima Setiap Worker di Akhir Eksekusi
+**Lawakfs.conf**
 
-Setelah proses selesai (semua pesan sudah diproses), setiap worker akan mencatat jumlah total pesan yang mereka terima ke bagian akhir file `sistem.log`.
+- **SECRET_FILE_BASENAME=secret**
+    Menentukan nama dasar file yang dianggap sebagai file rahasia.
 
-**sistem.log Ouput :**
-```
-Message from client: halo
-Message count: 5
-Received at lb: halo (#message 1)
-Received at lb: halo (#message 2)
-Received at lb: halo (#message 3)
-Received at lb: halo (#message 4)
-Received at lb: halo (#message 5)
-Worker3: message received
-Worker1: message received
-Worker1: message received
-Worker2: message received
-Worker2: message received
-Worker 1: 2 messages
-Worker 2: 2 messages
-Worker 3: 1 messages
-```
+- **ACCESS_START=08:00**
+    Menentukan jam mulai kapan file rahasia boleh diakses.
 
-**Ouput Sample :** <br>
+- **ACCESS_END=18:00**
+    Menentukan jam akhir kapan file rahasia masih boleh diakses.
 
-![image](https://github.com/user-attachments/assets/ef7557b7-d0c5-4503-ba01-ac6cc02be2ed)
----
+### Screnshoot
 
+![Screenshot 2025-06-22 181935](https://github.com/user-attachments/assets/16f3a986-dd21-4659-86cf-520b2e5080e6)
 
-### HOW TO RUN THE CODE
-- Jalankan semua proses di terminal berbeda 
-- Jalankan `loadbalancer.c` terlebih dahulu
-- Setelahnya jalankan `worker.c` sesuai dengan jumlah worker yang ada dan setiap worker di run pada terminal yang berbeda
-- Terakhir baru jalankan `client.c` dan input pesan dan jumlah pesan yang diinginkan
-- Jika pesan sudah input maka input `Ctrl+C` kepada semua proses yang berjalan untuk menghentikan program dan hasil dicatat pada `sistem.log`
+![Screenshot 2025-06-22 183111](https://github.com/user-attachments/assets/afe0a055-040f-4969-bc80-5cc2080a1c34)
+
